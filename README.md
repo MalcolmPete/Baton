@@ -1,73 +1,22 @@
-# React + TypeScript + Vite
+# Baton
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Baton is a documentation app for writing handoff notes, installation guides and account-setup docs, with annotated screenshots, sharing links and PDF or Markdown export.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Rich text editor:** headings, lists, code blocks, callouts, highlights and tables
+- **Images:** upload, drag and drop or paste straight from the clipboard
+- **Annotations:** draw circles and arrows on screenshots to point things out
+- **Doc types and folders:** organise docs as Handoff, Installation Guide or Account Setup and group them in folders
+- **Sharing:** create view-only or edit links; anyone can open view links without an account
+- **Export:** download any doc as a PDF (with selectable text) or as Markdown
+- **Sign-in:** email and password or Google
 
-## React Compiler
+## Tech stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- React 19, TypeScript and Vite
+- [Tiptap](https://tiptap.dev) v3 for the editor
+- [Supabase](https://supabase.com) for the database (Postgres), sign-in and image storage
+- TanStack Query for data fetching and caching
+- react-konva for annotations, `@react-pdf/renderer` for PDF export
+- Tailwind CSS v4
