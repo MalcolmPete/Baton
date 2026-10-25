@@ -21,7 +21,7 @@ export function useTheme() {
 function applyTheme(t: Theme) {
   document.documentElement.classList.toggle('dark', t === 'dark')
   const link = document.querySelector<HTMLLinkElement>("link[rel='icon']")
-  if (link) link.href = t === 'dark' ? '/favicon-dark.svg' : '/favicon-light.svg'
+  if (link) link.href = t === 'dark' ? '/logo-dark.svg' : '/logo.svg'
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
