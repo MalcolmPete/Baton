@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -43,6 +43,8 @@ function Sep() {
 
 export function RichEditor({ docId, initialContent, onChange, readOnly = false }: RichEditorProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // editorProps are bound when the editor is created, before handleImageFile exists
+  const imageFileHandlerRef = useRef<(file: File) => Promise<void>>(async () => {})
   const { user } = useAuth()
 
   const editor = useEditor({
@@ -58,7 +60,17 @@ export function RichEditor({ docId, initialContent, onChange, readOnly = false }
     ],
     content: initialContent,
     editable: !readOnly,
-    editorProps: { attributes: { class: 'tiptap-editor' } },
+    editorProps: {
+      attributes: { class: 'tiptap-editor' },
+      handlePaste(_view, event) {
+        const images = Array.from(event.clipboardData?.files ?? []).filter(f => f.type.startsWith('image/'))
+        if (readOnly || images.length === 0) return false
+        event.preventDefault()
+        // Upload sequentially so images land in the order they were pasted
+        void images.reduce((prev, file) => prev.then(() => imageFileHandlerRef.current(file)), Promise.resolve())
+        return true
+      },
+    },
     onUpdate({ editor }) {
       if (!readOnly) onChange(editor.getJSON() as Record<string, unknown>)
     },
@@ -75,6 +87,7 @@ export function RichEditor({ docId, initialContent, onChange, readOnly = false }
     const imageId = await addImageBlock(docId, path)
     editor.chain().focus().insertContent({ type: 'imageBlock', attrs: { imageId, caption: '' } }).run()
   }, [editor, docId, user])
+  useEffect(() => { imageFileHandlerRef.current = handleImageFile }, [handleImageFile])
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
