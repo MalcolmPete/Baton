@@ -1,0 +1,138 @@
+@import "tailwindcss";
+
+/* ── Light mode tokens ─────────────────────────────────────────────────────── */
+:root {
+  --bg: #ffffff;
+  --bg-subtle: #F5F5F3;
+  --border: rgba(0, 0, 0, 0.1);
+  --text-1: #1A1A1A;
+  --text-2: #6B6B6B;
+  --text-3: #9B9B9B;
+  --radius-card: 12px;
+  --radius-btn: 8px;
+  --code-block-bg: #1A1A1A;
+  --code-block-text: #F0F0EE;
+  --inline-code-bg: rgba(0, 0, 0, 0.05);
+}
+
+/* ── Dark mode tokens ──────────────────────────────────────────────────────── */
+html.dark {
+  --bg: #1C1C1E;
+  --bg-subtle: #141416;
+  --border: rgba(255, 255, 255, 0.08);
+  --text-1: #EDEDEE;
+  --text-2: #888888;
+  --text-3: #555555;
+  --code-block-bg: #0D0D0F;
+  --code-block-text: #DEDEDE;
+  --inline-code-bg: rgba(255, 255, 255, 0.07);
+}
+
+/* ── Logo ──────────────────────────────────────────────────────────────────── */
+/* Logo is black-on-white; invert in dark mode so it reads on dark backgrounds */
+.app-logo { display: block; }
+html.dark .app-logo { filter: invert(1); }
+
+/* ── Base ──────────────────────────────────────────────────────────────────── */
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg-subtle);
+    color: var(--text-1);
+    font-family: system-ui, 'Inter', sans-serif;
+    font-size: 14px;
+    line-height: 1.75;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    transition: background 0.2s, color 0.2s;
+  }
+
+  #root { min-height: 100svh; }
+}
+
+/* ── Doc type badges ───────────────────────────────────────────────────────── */
+.badge-handoff       { background: #E6F1FB; color: #0C447C; }
+.badge-installation  { background: #EAF3DE; color: #27500A; }
+.badge-account-setup { background: #EEEDFE; color: #3C3489; }
+
+html.dark .badge-handoff       { background: #0F2236; color: #6FB3E0; }
+html.dark .badge-installation  { background: #0D1E08; color: #5EBF42; }
+html.dark .badge-account-setup { background: #1B1650; color: #9089DE; }
+
+/* ── Tiptap editor prose ───────────────────────────────────────────────────── */
+.tiptap-editor { outline: none; min-height: 50vh; }
+
+.tiptap-editor h1 { font-size: 1.625rem;   font-weight: 500; margin: 1.75rem 0 0.5rem;   color: var(--text-1); }
+.tiptap-editor h2 { font-size: 1.25rem;    font-weight: 500; margin: 1.5rem 0 0.375rem;  color: var(--text-1); }
+.tiptap-editor h3 { font-size: 1.0625rem;  font-weight: 500; margin: 1.25rem 0 0.25rem;  color: var(--text-1); }
+.tiptap-editor p  { margin-bottom: 0.625rem; color: var(--text-1); line-height: 1.75; }
+.tiptap-editor strong { font-weight: 500; }
+.tiptap-editor em     { font-style: italic; }
+.tiptap-editor u      { text-underline-offset: 2px; }
+.tiptap-editor code   { font-family: ui-monospace, monospace; font-size: 0.8125rem; background: var(--inline-code-bg); color: var(--text-1); padding: 0.1rem 0.35rem; border-radius: 4px; }
+.tiptap-editor pre    { background: var(--code-block-bg); color: var(--code-block-text); border-radius: 8px; padding: 1rem; margin: 0.875rem 0; overflow-x: auto; }
+.tiptap-editor pre code { background: transparent; color: inherit; padding: 0; }
+.tiptap-editor ul   { list-style-type: disc;    padding-left: 1.375rem; margin-bottom: 0.625rem; }
+.tiptap-editor ol   { list-style-type: decimal; padding-left: 1.375rem; margin-bottom: 0.625rem; }
+.tiptap-editor li   { line-height: 1.75; color: var(--text-1); }
+.tiptap-editor hr   { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+.tiptap-editor blockquote { border-left: 2px solid var(--border); padding-left: 1rem; color: var(--text-2); margin: 0.875rem 0; }
+.tiptap-editor a    { color: #0C447C; text-decoration: underline; text-underline-offset: 2px; }
+.tiptap-editor mark { background: #fef08a; color: inherit; border-radius: 2px; padding: 0 1px; }
+html.dark .tiptap-editor mark { background: #713f12; color: #fef9c3; }
+
+html.dark .tiptap-editor a { color: #6FB3E0; }
+
+/* ── Tables ────────────────────────────────────────────────────────────── */
+.tiptap-editor .tableWrapper { overflow-x: auto; margin: 1rem 0; }
+
+.tiptap-editor table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.tiptap-editor th,
+.tiptap-editor td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+  min-width: 80px;
+  position: relative;
+}
+
+.tiptap-editor th {
+  background: var(--bg-subtle);
+  font-weight: 500;
+  font-size: 0.8125rem;
+  color: var(--text-1);
+}
+
+.tiptap-editor td {
+  color: var(--text-1);
+  font-size: 0.875rem;
+}
+
+.tiptap-editor td p,
+.tiptap-editor th p { margin: 0; }
+
+.tiptap-editor .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(60, 52, 137, 0.08);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Placeholder */
+.tiptap-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--text-3);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
