@@ -20,6 +20,7 @@ CREATE TABLE docs (
   title       TEXT NOT NULL DEFAULT '',
   content     JSONB NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}',
   icon        JSONB,
+  version     INTEGER NOT NULL DEFAULT 1,   -- bumped on title/content change; detects conflicting saves
   created_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL,
   updated_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
@@ -87,13 +88,15 @@ CREATE POLICY "docs_claimed_edit" ON docs FOR UPDATE
     )
   );
 
--- image_blocks: owner full access
-CREATE POLICY "image_blocks_owner" ON image_blocks FOR ALL
-  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
-
--- shares: only the owner manages their shares
+-- shares: only the owner manages their shares, and only for resources they own
 CREATE POLICY "shares_owner" ON shares FOR ALL
-  USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+  USING (owner_id = auth.uid())
+  WITH CHECK (
+    owner_id = auth.uid() AND (
+      (resource_type = 'doc'    AND EXISTS (SELECT 1 FROM docs    WHERE docs.id    = shares.resource_id AND docs.user_id    = auth.uid())) OR
+      (resource_type = 'folder' AND EXISTS (SELECT 1 FROM folders WHERE folders.id = shares.resource_id AND folders.user_id = auth.uid()))
+    )
+  );
 
 -- ── doc_editors (maps edit-share claimers to docs) ────────────────────────────
 
@@ -134,14 +137,21 @@ CREATE POLICY "docs_claimed_select" ON docs FOR SELECT
     )
   );
 
--- Allow claimed editors to read image_blocks:
-CREATE POLICY "image_blocks_editor" ON image_blocks FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM doc_editors
-      WHERE doc_id = image_blocks.doc_id AND user_id = auth.uid()
-    )
-  );
+-- image_blocks: the doc's owner and claimed editors
+CREATE OR REPLACE FUNCTION can_edit_doc(p_doc_id UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (SELECT 1 FROM docs WHERE id = p_doc_id AND user_id = auth.uid())
+      OR EXISTS (SELECT 1 FROM doc_editors WHERE doc_id = p_doc_id AND user_id = auth.uid());
+$$;
+
+CREATE POLICY "image_blocks_select" ON image_blocks FOR SELECT
+  USING (can_edit_doc(doc_id));
+CREATE POLICY "image_blocks_insert" ON image_blocks FOR INSERT
+  WITH CHECK (user_id = auth.uid() AND can_edit_doc(doc_id));
+CREATE POLICY "image_blocks_update" ON image_blocks FOR UPDATE
+  USING (can_edit_doc(doc_id)) WITH CHECK (can_edit_doc(doc_id));
+CREATE POLICY "image_blocks_delete" ON image_blocks FOR DELETE
+  USING (can_edit_doc(doc_id));
 
 -- ── updated_at trigger ────────────────────────────────────────────────────────
 
@@ -153,9 +163,44 @@ $$;
 CREATE TRIGGER docs_updated_at BEFORE UPDATE ON docs
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+-- ── docs: editors may change title and content only ──────────────────────────
+
+CREATE OR REPLACE FUNCTION protect_doc_owner_fields()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF auth.uid() IS NOT NULL AND auth.uid() IS DISTINCT FROM OLD.user_id AND (
+       NEW.user_id   IS DISTINCT FROM OLD.user_id
+    OR NEW.folder_id IS DISTINCT FROM OLD.folder_id
+    OR NEW.type      IS DISTINCT FROM OLD.type
+    OR NEW.icon      IS DISTINCT FROM OLD.icon
+  ) THEN
+    RAISE EXCEPTION 'Only the owner can change a document''s owner, folder, type or icon';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER docs_protect_owner_fields BEFORE UPDATE ON docs
+  FOR EACH ROW EXECUTE FUNCTION protect_doc_owner_fields();
+
+-- ── docs.version ──────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION bump_doc_version()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.title IS DISTINCT FROM OLD.title OR NEW.content IS DISTINCT FROM OLD.content THEN
+    NEW.version = OLD.version + 1;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER docs_bump_version BEFORE UPDATE ON docs
+  FOR EACH ROW EXECUTE FUNCTION bump_doc_version();
+
 -- ── get_shared_resource(token) ────────────────────────────────────────────────
 -- Called by anonymous users to view a shared doc.
--- SECURITY DEFINER bypasses RLS.
+-- SECURITY DEFINER bypasses RLS, so it only honours shares created by the resource's owner.
 
 CREATE OR REPLACE FUNCTION get_shared_resource(p_token TEXT)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -170,31 +215,31 @@ BEGIN
     SELECT jsonb_build_object(
       'permission',    v_share.permission,
       'resource_type', 'doc',
-      'doc',           to_jsonb(d),
+      'doc',           to_jsonb(d) - 'user_id',
       'image_blocks',  COALESCE((
-        SELECT jsonb_agg(to_jsonb(ib))
+        SELECT jsonb_agg(to_jsonb(ib) - 'user_id')
         FROM image_blocks ib WHERE ib.doc_id = d.id
       ), '[]'::jsonb)
     ) INTO v_result
-    FROM docs d WHERE d.id = v_share.resource_id;
+    FROM docs d WHERE d.id = v_share.resource_id AND d.user_id = v_share.owner_id;
   ELSE
     SELECT jsonb_build_object(
       'permission',    v_share.permission,
       'resource_type', 'folder',
-      'folder',        to_jsonb(f),
+      'folder',        to_jsonb(f) - 'user_id',
       'docs',          COALESCE((
         SELECT jsonb_agg(
-          to_jsonb(d) || jsonb_build_object(
+          (to_jsonb(d) - 'user_id') || jsonb_build_object(
             'image_blocks', COALESCE((
-              SELECT jsonb_agg(to_jsonb(ib))
+              SELECT jsonb_agg(to_jsonb(ib) - 'user_id')
               FROM image_blocks ib WHERE ib.doc_id = d.id
             ), '[]'::jsonb)
           )
         )
-        FROM docs d WHERE d.folder_id = v_share.resource_id
+        FROM docs d WHERE d.folder_id = f.id AND d.user_id = f.user_id
       ), '[]'::jsonb)
     ) INTO v_result
-    FROM folders f WHERE f.id = v_share.resource_id;
+    FROM folders f WHERE f.id = v_share.resource_id AND f.user_id = v_share.owner_id;
   END IF;
 
   RETURN v_result;
@@ -211,11 +256,13 @@ RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   v_share shares%ROWTYPE;
 BEGIN
-  SELECT * INTO v_share FROM shares
-  WHERE token = p_token AND permission = 'edit';
+  IF auth.uid() IS NULL THEN RETURN FALSE; END IF;
+
+  SELECT s.* INTO v_share FROM shares s
+  JOIN docs d ON d.id = s.resource_id AND d.user_id = s.owner_id
+  WHERE s.token = p_token AND s.permission = 'edit' AND s.resource_type = 'doc';
 
   IF NOT FOUND THEN RETURN FALSE; END IF;
-  IF v_share.resource_type != 'doc' THEN RETURN FALSE; END IF;
   -- Don't add the owner as an editor
   IF v_share.owner_id = auth.uid() THEN RETURN TRUE; END IF;
 
@@ -230,9 +277,19 @@ $$;
 GRANT EXECUTE ON FUNCTION claim_edit_share(TEXT) TO authenticated;
 
 -- ── Storage bucket ────────────────────────────────────────────────────────────
--- Run in the Storage section or via SQL:
+-- Create a public bucket named 'baton-images' in the Storage section, or:
 -- INSERT INTO storage.buckets (id, name, public) VALUES ('baton-images', 'baton-images', true);
 --
 -- Storage RLS (add in Storage > Policies):
 -- Allow INSERT where bucket_id = 'baton-images' and (storage.foldername(name))[1] = auth.uid()::text
 -- Allow SELECT on all objects in bucket (bucket is public, URLs are unguessable UUIDs)
+--
+-- DELETE: paths are {uploaderId}/{docId}/{file}. Uploaders can delete their own
+-- files, and doc owners can delete any file in their docs.
+CREATE POLICY "baton_images_delete" ON storage.objects FOR DELETE
+  USING (
+    bucket_id = 'baton-images' AND (
+      (storage.foldername(name))[1] = auth.uid()::text OR
+      EXISTS (SELECT 1 FROM public.docs WHERE docs.id::text = (storage.foldername(name))[2] AND docs.user_id = auth.uid())
+    )
+  );

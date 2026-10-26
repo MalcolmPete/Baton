@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useDoc, useFolder, updateDoc } from '../store/useDocs'
+import { useDoc, useFolder, cleanupOrphanImages } from '../store/useDocs'
+import { useAutosave } from '../store/useAutosave'
 import { RichEditor } from '../components/editor/RichEditor'
+import { SaveStatus } from '../components/editor/SaveStatus'
 import { AnnotationContext } from '../components/annotation/AnnotationContext'
 import { AnnotationModal } from '../components/annotation/AnnotationModal'
 import { TypeBadge } from '../components/ui/TypeBadge'
@@ -10,8 +12,7 @@ import { ViewerContext } from '../context/ViewerContext'
 import { exportDocPdf } from '../lib/exportPdf'
 import { tiptapToMarkdown, downloadMarkdown } from '../lib/exportMarkdown'
 import { useAuth } from '../context/AuthContext'
-
-const SAVE_DEBOUNCE_MS = 600
+import type { Doc } from '../types'
 
 function timeAgo(ts: number): string {
   const secs = Math.floor((Date.now() - ts) / 1000)
@@ -24,54 +25,7 @@ function timeAgo(ts: number): string {
 export function EditorPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { user } = useAuth()
   const doc = useDoc(id!)
-  const folder = useFolder(doc?.folderId)
-  const [annotatingImageId, setAnnotatingImageId] = useState<string | null>(null)
-  const [sharing, setSharing] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  const titleTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const contentTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const [localTitle, setLocalTitle] = useState('')
-  useEffect(() => {
-    if (doc && localTitle === '') setLocalTitle(doc.title)
-  }, [doc])
-
-  const saveTitle = useCallback((title: string) => {
-    if (!id) return
-    if (titleTimer.current) clearTimeout(titleTimer.current)
-    titleTimer.current = setTimeout(() => {
-      updateDoc(id, { title }).catch(console.error)
-    }, SAVE_DEBOUNCE_MS)
-  }, [id])
-
-  const saveContent = useCallback((content: Record<string, unknown>) => {
-    if (!id) return
-    if (contentTimer.current) clearTimeout(contentTimer.current)
-    contentTimer.current = setTimeout(() => {
-      updateDoc(id, { content }).catch(console.error)
-    }, SAVE_DEBOUNCE_MS)
-  }, [id])
-
-  function handleTitleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const t = e.target.value
-    setLocalTitle(t)
-    saveTitle(t)
-  }
-
-  async function handleExport() {
-    if (!doc) return
-    setExporting(true)
-    try { await exportDocPdf({ ...doc, title: localTitle }) }
-    finally { setExporting(false) }
-  }
-
-  function handleExportMarkdown() {
-    if (!doc) return
-    const md = tiptapToMarkdown(doc.content)
-    downloadMarkdown(md, localTitle || 'document')
-  }
 
   if (doc === undefined) {
     return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', fontSize: 14 }}>Loading…</div>
@@ -84,6 +38,45 @@ export function EditorPage() {
         <button onClick={() => navigate('/')} style={{ color: '#0C447C', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', marginLeft: 4, fontSize: 14 }}>Go home</button>
       </div>
     )
+  }
+
+  // Keyed so switching docs starts a fresh editor and autosave
+  return <DocEditor key={doc.id} doc={doc} />
+}
+
+function DocEditor({ doc }: { doc: Doc }) {
+  const navigate = useNavigate()
+  const { user } = useAuth()
+  const folder = useFolder(doc.folderId)
+  const [annotatingImageId, setAnnotatingImageId] = useState<string | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [localTitle, setLocalTitle] = useState(doc.title)
+  // Latest editor content, which can be up to one debounce ahead of the cached doc
+  const latestContent = useRef(doc.content)
+  const autosave = useAutosave(doc.id, doc.version)
+
+  useEffect(() => { void cleanupOrphanImages(doc.id).catch(console.error) }, [doc.id])
+
+  function handleTitleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setLocalTitle(e.target.value)
+    autosave.schedule({ title: e.target.value })
+  }
+
+  function handleContentChange(content: Record<string, unknown>) {
+    latestContent.current = content
+    autosave.schedule({ content })
+  }
+
+  async function handleExport() {
+    setExporting(true)
+    try { await exportDocPdf({ ...doc, title: localTitle, content: latestContent.current }) }
+    finally { setExporting(false) }
+  }
+
+  function handleExportMarkdown() {
+    const md = tiptapToMarkdown(latestContent.current)
+    downloadMarkdown(md, localTitle || 'document')
   }
 
   return (
@@ -140,8 +133,10 @@ export function EditorPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 36 }}>
               <TypeBadge type={doc.type} />
               <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Last edited {timeAgo(doc.updatedAt)}</span>
+              <span style={{ color: 'var(--border)' }}>·</span>
+              <SaveStatus status={autosave.status} error={autosave.error} onRetry={autosave.flush} onOverwrite={autosave.overwrite} onReload={autosave.discardAndReload} />
             </div>
-            <RichEditor docId={doc.id} initialContent={doc.content} onChange={saveContent} />
+            <RichEditor docId={doc.id} initialContent={doc.content} onChange={handleContentChange} />
           </div>
 
           {annotatingImageId && <AnnotationModal imageId={annotatingImageId} onClose={() => setAnnotatingImageId(null)} />}

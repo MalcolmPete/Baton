@@ -7,6 +7,8 @@ import { RichEditor } from '../components/editor/RichEditor'
 import { TypeBadge } from '../components/ui/TypeBadge'
 import { AnnotationContext } from '../components/annotation/AnnotationContext'
 import { AnnotationModal } from '../components/annotation/AnnotationModal'
+import { SaveStatus } from '../components/editor/SaveStatus'
+import { useAutosave } from '../store/useAutosave'
 import type { Doc, DocType } from '../types'
 
 interface SharedImageBlock {
@@ -22,6 +24,7 @@ interface SharedFolderDoc {
   content: Record<string, unknown>
   folder_id: string | null
   icon: unknown
+  version: number
   created_at: string
   updated_at: string
   image_blocks: SharedImageBlock[]
@@ -67,7 +70,8 @@ export function SharedDoc() {
   // When a logged-in user arrives via an edit link, claim edit access
   useEffect(() => {
     if (!payload || !user || payload.permission !== 'edit' || claimed) return
-    supabase.rpc('claim_edit_share', { p_token: token }).then(() => setClaimed(true))
+    // Only enable editing if the claim actually granted access
+    supabase.rpc('claim_edit_share', { p_token: token }).then(({ data }) => setClaimed(data === true))
   }, [payload, user, token, claimed])
 
   if (notFound) {
@@ -107,6 +111,7 @@ export function SharedDoc() {
     content: doc.content as Record<string, unknown>,
     folderId: (doc.folder_id as string) ?? null,
     icon: doc.icon as Doc['icon'],
+    version: (doc.version as number) ?? 1,
     createdAt: new Date(doc.created_at as string).getTime(),
     updatedAt: new Date(doc.updated_at as string).getTime(),
   }
@@ -163,25 +168,8 @@ export function SharedDoc() {
 
           {/* Content */}
           <div style={{ maxWidth: 720, margin: '0 auto', padding: '52px 32px 80px' }}>
-            <div style={{ fontSize: 24, fontWeight: 500, color: 'var(--text-1)', marginBottom: 10, lineHeight: 1.3 }}>
-              {docObj.title || <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>Untitled</span>}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 36 }}>
-              <TypeBadge type={docObj.type} />
-              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Last edited {timeAgo(docObj.updatedAt)}</span>
-              {!canEdit && (
-                <span style={{ fontSize: 11, color: 'var(--text-3)', backgroundColor: 'var(--bg-subtle)', padding: '2px 8px', borderRadius: 999, border: '1px solid var(--border)' }}>
-                  Read only
-                </span>
-              )}
-            </div>
-
-            <RichEditor
-              docId={docObj.id}
-              initialContent={docObj.content}
-              onChange={() => {/* handled by EditorPage; SharedDoc is read-only or edit-via-claim */}}
-              readOnly={!canEdit}
-            />
+            {/* Keyed so the editor (and its autosave) restarts once edit access is granted */}
+            <SharedDocBody key={canEdit ? 'edit' : 'view'} doc={docObj} canEdit={canEdit} />
           </div>
 
           {annotatingImageId && canEdit && (
@@ -190,6 +178,48 @@ export function SharedDoc() {
         </div>
       </AnnotationContext.Provider>
     </ViewerContext.Provider>
+  )
+}
+
+function SharedDocBody({ doc, canEdit }: { doc: Doc; canEdit: boolean }) {
+  const [title, setTitle] = useState(doc.title)
+  const autosave = useAutosave(doc.id, doc.version)
+
+  return (
+    <>
+      {canEdit ? (
+        <input
+          type="text" value={title} placeholder="Untitled"
+          onChange={e => { setTitle(e.target.value); autosave.schedule({ title: e.target.value }) }}
+          style={{ display: 'block', width: '100%', fontSize: 24, fontWeight: 500, color: 'var(--text-1)', background: 'transparent', border: 'none', outline: 'none', marginBottom: 10, lineHeight: 1.3 }}
+        />
+      ) : (
+        <div style={{ fontSize: 24, fontWeight: 500, color: 'var(--text-1)', marginBottom: 10, lineHeight: 1.3 }}>
+          {doc.title || <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>Untitled</span>}
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 36 }}>
+        <TypeBadge type={doc.type} />
+        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Last edited {timeAgo(doc.updatedAt)}</span>
+        {canEdit ? (
+          <>
+            <span style={{ color: 'var(--border)' }}>·</span>
+            <SaveStatus status={autosave.status} error={autosave.error} onRetry={autosave.flush} onOverwrite={autosave.overwrite} onReload={autosave.discardAndReload} />
+          </>
+        ) : (
+          <span style={{ fontSize: 11, color: 'var(--text-3)', backgroundColor: 'var(--bg-subtle)', padding: '2px 8px', borderRadius: 999, border: '1px solid var(--border)' }}>
+            Read only
+          </span>
+        )}
+      </div>
+
+      <RichEditor
+        docId={doc.id}
+        initialContent={doc.content}
+        onChange={content => autosave.schedule({ content })}
+        readOnly={!canEdit}
+      />
+    </>
   )
 }
 
@@ -208,6 +238,7 @@ function SharedFolderView({ payload }: { payload: SharedPayload }) {
       content: selectedDoc.content,
       folderId: selectedDoc.folder_id,
       icon: selectedDoc.icon as Doc['icon'],
+      version: selectedDoc.version ?? 1,
       createdAt: new Date(selectedDoc.created_at).getTime(),
       updatedAt: new Date(selectedDoc.updated_at).getTime(),
     }

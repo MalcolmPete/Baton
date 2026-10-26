@@ -30,7 +30,7 @@ async function uid(): Promise<string> {
 function toDoc(r: any): Doc {
   return {
     id: r.id, type: r.type, title: r.title, content: r.content,
-    folderId: r.folder_id, icon: r.icon ?? undefined,
+    folderId: r.folder_id, icon: r.icon ?? undefined, version: r.version ?? 1,
     createdAt: new Date(r.created_at).getTime(),
     updatedAt: new Date(r.updated_at).getTime(),
   }
@@ -146,18 +146,41 @@ export async function createDoc(type: DocType, folderId: string | null = null): 
   return data.id as string
 }
 
-export async function updateDoc(id: string, updates: Partial<Pick<Doc, 'title' | 'content'>>) {
+export type DocUpdates = Partial<Pick<Doc, 'title' | 'content'>>
+
+// Thrown when the doc was saved elsewhere since `expectedVersion` was loaded
+export class DocConflictError extends Error {
+  constructor() { super('This document was changed somewhere else') }
+}
+
+// Saves only if nobody else has saved since `expectedVersion`; returns the new version
+export async function updateDoc(id: string, updates: DocUpdates, expectedVersion: number): Promise<number> {
   const row: Record<string, unknown> = {}
   if (updates.title !== undefined) row.title = updates.title
   if (updates.content !== undefined) row.content = updates.content
-  const { error } = await supabase.from('docs').update(row).eq('id', id)
+  const { data, error } = await supabase.from('docs').update(row)
+    .eq('id', id).eq('version', expectedVersion)
+    .select('version').maybeSingle()
   if (error) throw error
-  // Optimistically update the single-doc cache (correct exact key)
+  if (!data) {
+    // No row matched: either the version moved on, or we can't write this doc
+    const current = await getDocVersion(id)
+    if (current !== null && current !== expectedVersion) throw new DocConflictError()
+    throw new Error("You don't have permission to edit this document")
+  }
+  const version = data.version as number
   queryClient.setQueryData<Doc>(['doc', id], old =>
-    old ? { ...old, ...updates, updatedAt: Date.now() } : old,
+    old ? { ...old, ...updates, version, updatedAt: Date.now() } : old,
   )
   // Invalidate the list so Home page picks up the change on next render
   queryClient.invalidateQueries({ queryKey: ['docs'] })
+  return version
+}
+
+export async function getDocVersion(id: string): Promise<number | null> {
+  const { data, error } = await supabase.from('docs').select('version').eq('id', id).maybeSingle()
+  if (error) throw error
+  return data ? data.version as number : null
 }
 
 export async function updateDocIcon(docId: string, icon: DocIcon | undefined) {
@@ -173,6 +196,10 @@ export async function moveDocToFolder(docId: string, folderId: string | null) {
 }
 
 export async function deleteDoc(id: string) {
+  // image_blocks rows cascade with the doc, but their files have to be removed from Storage here
+  const { data: blocks } = await supabase.from('image_blocks').select('storage_path').eq('doc_id', id)
+  const paths = (blocks ?? []).map(b => b.storage_path as string)
+  if (paths.length) await supabase.storage.from('baton-images').remove(paths)
   const { error } = await supabase.from('docs').delete().eq('id', id)
   if (error) throw error
   await queryClient.invalidateQueries({ queryKey: ['docs'] })
@@ -232,15 +259,34 @@ export async function updateImageBlock(id: string, updates: Partial<Pick<ImageBl
   queryClient.invalidateQueries({ queryKey: ['imageBlock', id] })
 }
 
-export async function deleteImageBlock(id: string) {
-  // Fetch storage_path first so we can clean up Storage
-  const { data } = await supabase.from('image_blocks').select('storage_path, doc_id').eq('id', id).maybeSingle()
-  if (data) {
-    await supabase.storage.from('baton-images').remove([data.storage_path])
-    await queryClient.invalidateQueries({ queryKey: ['imageBlocks', data.doc_id] })
-  }
-  const { error } = await supabase.from('image_blocks').delete().eq('id', id)
-  if (error) throw error
+// Image nodes can leave a doc many ways (delete button, backspace, cut, undo), and an
+// undo can bring one back, so blocks aren't deleted with the node. Instead, blocks the
+// saved content no longer references are swept once they're older than the grace period.
+const ORPHAN_GRACE_MS = 24 * 60 * 60 * 1000
+
+function collectImageIds(node: unknown, ids: Set<string>) {
+  if (!node || typeof node !== 'object') return
+  const n = node as { type?: string; attrs?: { imageId?: string }; content?: unknown[] }
+  if (n.type === 'imageBlock' && n.attrs?.imageId) ids.add(n.attrs.imageId)
+  n.content?.forEach(child => collectImageIds(child, ids))
+}
+
+export async function cleanupOrphanImages(docId: string) {
+  const [{ data: doc }, { data: blocks }] = await Promise.all([
+    supabase.from('docs').select('content').eq('id', docId).maybeSingle(),
+    supabase.from('image_blocks').select('id, storage_path, created_at').eq('doc_id', docId),
+  ])
+  if (!doc || !blocks) return
+  const referenced = new Set<string>()
+  collectImageIds(doc.content, referenced)
+  const cutoff = Date.now() - ORPHAN_GRACE_MS
+  const orphans = blocks.filter(b => !referenced.has(b.id as string) && new Date(b.created_at as string).getTime() < cutoff)
+  if (!orphans.length) return
+  // Only drop rows whose file was actually removed (Storage policies may refuse some)
+  const { data: removed } = await supabase.storage.from('baton-images').remove(orphans.map(b => b.storage_path as string))
+  const removedPaths = new Set((removed ?? []).map(f => f.name))
+  const ids = orphans.filter(b => removedPaths.has(b.storage_path as string)).map(b => b.id as string)
+  if (ids.length) await supabase.from('image_blocks').delete().in('id', ids)
 }
 
 // ─── Shares ───────────────────────────────────────────────────────────────────

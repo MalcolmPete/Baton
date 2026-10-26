@@ -59,6 +59,7 @@ export interface Doc {
   content: Record<string, any>  // Tiptap JSON document
   folderId: string | null
   icon?: DocIcon
+  version: number  // bumped by the DB on every title/content change
   createdAt: number
   updatedAt: number
 }

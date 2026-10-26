@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react'
 import { getImageUrl } from '../../lib/supabase'
-import { useImageBlock, deleteImageBlock } from '../../store/useDocs'
+import { useImageBlock } from '../../store/useDocs'
 import { useAnnotationContext } from '../annotation/AnnotationContext'
 import { useViewer } from '../../context/ViewerContext'
 import { renderAnnotatedImage } from '../../lib/renderAnnotatedImage'
@@ -19,7 +19,8 @@ export function ImageNodeView({ node, updateAttributes, deleteNode }: ReactNodeV
   const { openAnnotation } = useAnnotationContext()
   const { imageBlocks: viewerBlocks, isReadOnly } = useViewer()
 
-  const viewerData = viewerBlocks[imageId]
+  // Pre-fetched data is a snapshot, so editors read the live row to see annotation changes
+  const viewerData = isReadOnly ? viewerBlocks[imageId] : undefined
   const dbBlock = useImageBlock(viewerData ? null : imageId)
 
   const storagePath = viewerData?.storagePath ?? dbBlock?.storagePath ?? null
@@ -42,11 +43,6 @@ export function ImageNodeView({ node, updateAttributes, deleteNode }: ReactNodeV
 
   const justification =
     align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center'
-
-  async function handleDelete() {
-    await deleteImageBlock(imageId)
-    deleteNode()
-  }
 
   return (
     <NodeViewWrapper className="my-6 group" data-drag-handle="">
@@ -82,7 +78,7 @@ export function ImageNodeView({ node, updateAttributes, deleteNode }: ReactNodeV
                   {hasAnnotations ? `✎ ${annotations.length} annotation${annotations.length !== 1 ? 's' : ''}` : '✎ Annotate'}
                 </button>
                 <button
-                  onClick={handleDelete}
+                  onClick={deleteNode}
                   style={{ backgroundColor: 'rgba(255,255,255,0.92)', color: '#c0392b', fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer' }}
                 >×</button>
               </div>
