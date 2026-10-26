@@ -11,6 +11,7 @@ export const ImageBlockExtension = Node.create({
   addAttributes() {
     return {
       imageId: { default: null },
+      uploadId: { default: null },        // set while the image is still uploading (imageId is null)
       caption: { default: '' },
       width:   { default: 100 },          // percent: 25 | 50 | 75 | 100
       align:   { default: 'center' },     // 'left' | 'center' | 'right'

@@ -11,7 +11,7 @@ import {
   deleteDoc,
   updateDocIcon,
 } from '../store/useDocs'
-import { DOC_TYPE_LABELS, type Doc, type DocType, type DocIcon, type Folder } from '../types'
+import { DOC_TYPE_LABELS, type DocSummary, type DocType, type DocIcon, type Folder } from '../types'
 import { DocIcon as DocIconDisplay } from '../components/ui/DocIcon'
 import { IconPicker } from '../components/ui/IconPicker'
 import { ShareModal } from '../components/share/ShareModal'
@@ -66,7 +66,7 @@ function DocListRow({
   folders,
   onIconClick,
 }: {
-  doc: Doc
+  doc: DocSummary
   folders: Folder[]
   onIconClick: (docId: string) => void
 }) {
@@ -482,7 +482,7 @@ function BottomLinks() {
 
 interface SidebarProps {
   folders: Folder[]
-  allDocs: Doc[]
+  allDocs: DocSummary[]
   selectedFolderId: string | null | 'all'
   onSelectFolder: (id: string | null | 'all') => void
   creatingFolder: boolean

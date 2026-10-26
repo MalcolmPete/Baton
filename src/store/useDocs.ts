@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { supabase } from '../lib/supabase'
 import { queryClient } from '../lib/queryClient'
 import { useAuth } from '../context/AuthContext'
-import type { Doc, DocIcon, DocType, Folder, ImageBlock } from '../types'
+import type { Doc, DocIcon, DocSummary, DocType, Folder, ImageBlock } from '../types'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -27,14 +27,21 @@ async function uid(): Promise<string> {
 // ─── Row mappers (Supabase snake_case → app camelCase) ────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toDoc(r: any): Doc {
+function toDocSummary(r: any): DocSummary {
   return {
-    id: r.id, type: r.type, title: r.title, content: r.content,
+    id: r.id, type: r.type, title: r.title,
     folderId: r.folder_id, icon: r.icon ?? undefined, version: r.version ?? 1,
     createdAt: new Date(r.created_at).getTime(),
     updatedAt: new Date(r.updated_at).getTime(),
   }
 }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toDoc(r: any): Doc {
+  return { ...toDocSummary(r), content: r.content }
+}
+
+// Columns for the doc list — leaves out content, which the list never shows
+const DOC_SUMMARY_COLUMNS = 'id, type, title, folder_id, icon, version, created_at, updated_at'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toFolder(r: any): Folder {
   return { id: r.id, name: r.name, createdAt: new Date(r.created_at).getTime() }
@@ -104,16 +111,16 @@ export async function deleteFolder(id: string) {
 
 // ─── Docs ─────────────────────────────────────────────────────────────────────
 
-export function useAllDocs(): Doc[] | undefined {
+export function useAllDocs(): DocSummary[] | undefined {
   const { user } = useAuth()
   const q = useQuery({
     queryKey: ['docs', user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('docs').select('*')
+        .from('docs').select(DOC_SUMMARY_COLUMNS)
         .order('updated_at', { ascending: false })
       if (error) throw error
-      return (data ?? []).map(toDoc)
+      return (data ?? []).map(toDocSummary)
     },
     enabled: !!user,
   })
@@ -169,11 +176,15 @@ export async function updateDoc(id: string, updates: DocUpdates, expectedVersion
     throw new Error("You don't have permission to edit this document")
   }
   const version = data.version as number
+  const updatedAt = Date.now()
   queryClient.setQueryData<Doc>(['doc', id], old =>
-    old ? { ...old, ...updates, version, updatedAt: Date.now() } : old,
+    old ? { ...old, ...updates, version, updatedAt } : old,
   )
-  // Invalidate the list so Home page picks up the change on next render
-  queryClient.invalidateQueries({ queryKey: ['docs'] })
+  // Patch the list in place rather than refetching it on every autosave
+  const { title } = updates
+  queryClient.setQueriesData<DocSummary[]>({ queryKey: ['docs'] }, list => list
+    ?.map(d => d.id === id ? { ...d, ...(title !== undefined && { title }), version, updatedAt } : d)
+    .sort((a, b) => b.updatedAt - a.updatedAt))
   return version
 }
 

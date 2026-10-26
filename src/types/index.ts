@@ -63,3 +63,6 @@ export interface Doc {
   createdAt: number
   updatedAt: number
 }
+
+// What the doc list needs: everything except the (potentially large) content
+export type DocSummary = Omit<Doc, 'content'>

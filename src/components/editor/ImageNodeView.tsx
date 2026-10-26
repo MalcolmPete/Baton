@@ -5,6 +5,7 @@ import { useImageBlock } from '../../store/useDocs'
 import { useAnnotationContext } from '../annotation/AnnotationContext'
 import { useViewer } from '../../context/ViewerContext'
 import { renderAnnotatedImage } from '../../lib/renderAnnotatedImage'
+import { activeUploads } from './uploads'
 import type { Annotation } from '../../types'
 
 const WIDTHS = [25, 50, 75, 100] as const
@@ -37,6 +38,25 @@ export function ImageNodeView({ node, updateAttributes, deleteNode }: ReactNodeV
       .catch(() => setDisplayUrl(rawUrl))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawUrl, JSON.stringify(annotations)])
+
+  // Placeholder inserted before its upload finished
+  if (!imageId) {
+    const uploadId = node.attrs.uploadId as string | null
+    const uploading = !!uploadId && activeUploads.has(uploadId)
+    if (isReadOnly && !uploading) return <NodeViewWrapper />
+    return (
+      <NodeViewWrapper className="my-6">
+        <div style={{ height: 96, borderRadius: 8, border: '1px dashed var(--border)', backgroundColor: 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--text-3)', fontSize: 13 }}>
+          {uploading ? 'Uploading image…' : (
+            <>
+              This image didn't finish uploading.
+              <button onClick={deleteNode} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 13, color: 'var(--text-2)', textDecoration: 'underline' }}>Remove</button>
+            </>
+          )}
+        </div>
+      </NodeViewWrapper>
+    )
+  }
 
   const hasAnnotations = annotations.length > 0
   const isLoading = !rawUrl

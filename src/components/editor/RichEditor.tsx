@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef } from 'react'
-import { EditorContent, useEditor } from '@tiptap/react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { EditorContent, useEditor, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { Highlight } from '@tiptap/extension-highlight'
@@ -9,6 +9,7 @@ import { TableHeader } from '@tiptap/extension-table-header'
 import { TableCell } from '@tiptap/extension-table-cell'
 import { ImageBlockExtension } from './imageExtension'
 import { BubbleToolbar } from './BubbleToolbar'
+import { activeUploads, imageFileError } from './uploads'
 import { addImageBlock } from '../../store/useDocs'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
@@ -35,6 +36,16 @@ function Btn({ active, onClick, title, style, children }: {
   )
 }
 
+// Position of the placeholder node for an upload, or null if it has since been removed
+function findUploadPlaceholder(editor: Editor, uploadId: string): number | null {
+  let found: number | null = null
+  editor.state.doc.descendants((node, pos) => {
+    if (found !== null) return false
+    if (node.type.name === 'imageBlock' && node.attrs.uploadId === uploadId) { found = pos; return false }
+  })
+  return found
+}
+
 function Sep() {
   return <div style={{ width: 1, height: 18, backgroundColor: 'rgba(0,0,0,0.1)', margin: '0 5px', flexShrink: 0 }} />
 }
@@ -46,6 +57,7 @@ export function RichEditor({ docId, initialContent, onChange, readOnly = false }
   // editorProps are bound when the editor is created, before handleImageFile exists
   const imageFileHandlerRef = useRef<(file: File) => Promise<void>>(async () => {})
   const { user } = useAuth()
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   const editor = useEditor({
     extensions: [
@@ -66,8 +78,8 @@ export function RichEditor({ docId, initialContent, onChange, readOnly = false }
         const images = Array.from(event.clipboardData?.files ?? []).filter(f => f.type.startsWith('image/'))
         if (readOnly || images.length === 0) return false
         event.preventDefault()
-        // Upload sequentially so images land in the order they were pasted
-        void images.reduce((prev, file) => prev.then(() => imageFileHandlerRef.current(file)), Promise.resolve())
+        // Each call inserts its placeholder before awaiting, so images keep their pasted order
+        images.forEach(file => void imageFileHandlerRef.current(file))
         return true
       },
     },
@@ -78,14 +90,40 @@ export function RichEditor({ docId, initialContent, onChange, readOnly = false }
 
   const handleImageFile = useCallback(async (file: File) => {
     if (!editor || !user) return
-    // Use a separate UUID just for the storage path; the DB record ID comes back from addImageBlock
-    const storageName = uuidv4()
-    const path = `${user.id}/${docId}/${storageName}`
-    const { error } = await supabase.storage.from('baton-images').upload(path, file, { contentType: file.type })
-    if (error) { console.error('Image upload failed:', error.message); return }
-    // addImageBlock returns the actual DB record ID — this is what ImageNodeView queries by
-    const imageId = await addImageBlock(docId, path)
-    editor.chain().focus().insertContent({ type: 'imageBlock', attrs: { imageId, caption: '' } }).run()
+    const invalid = imageFileError(file)
+    if (invalid) { setUploadError(invalid); return }
+    setUploadError(null)
+
+    // Show an "Uploading…" placeholder right away; it becomes the image once the upload lands
+    const uploadId = uuidv4()
+    activeUploads.add(uploadId)
+    editor.chain().focus().insertContent({ type: 'imageBlock', attrs: { imageId: null, uploadId, caption: '' } }).run()
+
+    // Swap or remove the placeholder outside undo history, so undo only ever sees the insert
+    function updatePlaceholder(imageId: string | null) {
+      if (!editor || editor.isDestroyed) return
+      const pos = findUploadPlaceholder(editor, uploadId)
+      const node = pos === null ? null : editor.state.doc.nodeAt(pos)
+      if (pos === null || !node) return
+      const tr = imageId
+        ? editor.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, imageId, uploadId: null })
+        : editor.state.tr.delete(pos, pos + node.nodeSize)
+      editor.view.dispatch(tr.setMeta('addToHistory', false))
+    }
+
+    try {
+      // Use a separate UUID just for the storage path; the DB record ID comes back from addImageBlock
+      const path = `${user.id}/${docId}/${uuidv4()}`
+      const { error } = await supabase.storage.from('baton-images').upload(path, file, { contentType: file.type })
+      if (error) throw error
+      // addImageBlock returns the actual DB record ID — this is what ImageNodeView queries by
+      updatePlaceholder(await addImageBlock(docId, path))
+    } catch (err) {
+      updatePlaceholder(null)
+      setUploadError(`"${file.name}" couldn't be uploaded: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      activeUploads.delete(uploadId)
+    }
   }, [editor, docId, user])
   useEffect(() => { imageFileHandlerRef.current = handleImageFile }, [handleImageFile])
 
@@ -146,7 +184,14 @@ export function RichEditor({ docId, initialContent, onChange, readOnly = false }
         </div>
       )}
 
-      <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileChange} />
+      {uploadError && !readOnly && (
+        <div role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, margin: '-12px 0 20px', padding: '8px 12px', borderRadius: 8, fontSize: 13, color: '#c0392b', backgroundColor: 'rgba(192,57,43,0.08)', border: '1px solid rgba(192,57,43,0.25)' }}>
+          <span>{uploadError}</span>
+          <button type="button" onClick={() => setUploadError(null)} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 15, lineHeight: 1 }}>×</button>
+        </div>
+      )}
+
+      <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" style={{ display: 'none' }} onChange={handleFileChange} />
       <BubbleToolbar editor={editor} />
       <EditorContent editor={editor} />
     </div>
