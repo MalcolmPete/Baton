@@ -20,3 +20,7 @@ Baton is a documentation app for writing handoff notes, installation guides and 
 - TanStack Query for data fetching and caching
 - react-konva for annotations, `@react-pdf/renderer` for PDF export
 - Tailwind CSS v4
+
+## License
+
+[MIT](LICENSE)
