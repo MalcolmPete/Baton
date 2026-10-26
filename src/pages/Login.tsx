@@ -154,7 +154,7 @@ export function Login() {
               fontSize: 16, color: 'rgba(255,255,255,0.5)',
               lineHeight: 1.65, margin: '0 0 32px',
             }}>
-              Create handoff docs, installation guides, and account setups — with images, annotations, and PDF export built in.
+              Create handoff docs, installation guides and account setups with images, annotations, and PDF export built in.
             </p>
 
             {/* Features */}
@@ -330,7 +330,7 @@ export function Login() {
                   onClick={() => switchTab('signup')}
                   style={{ fontSize: 13, fontWeight: 600, color: '#111111', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                 >
-                  Create one free
+                  Create one
                 </button>
               </>
             ) : (
