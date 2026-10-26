@@ -144,6 +144,7 @@ function LinkSection({
             <button
               onClick={onGenerate}
               disabled={generating}
+              title={`Replace this link with a new one. The old link stops working${label === 'Edit link' ? '; people who already joined keep edit access' : ''}.`}
               style={{ fontSize: 12, color: 'var(--text-3)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
             >
               {generating ? 'Regenerating…' : 'Regenerate'}
@@ -214,7 +215,10 @@ export function ShareModal({ resourceType, resourceId, resourceTitle, onClose }:
   async function handleRevoke(permission: 'view' | 'edit') {
     const share = permission === 'view' ? viewShare : editShare
     if (!share) return
-    if (!confirm(`Revoke this ${permission} link? Anyone using it will lose access.`)) return
+    const message = permission === 'edit'
+      ? 'Revoke this edit link? The link will stop working, and everyone who joined through it will lose edit access.'
+      : 'Revoke this view link? Anyone using it will lose access.'
+    if (!confirm(message)) return
     await deleteShare(share.id)
     if (permission === 'view') setViewShare(null)
     else setEditShare(null)

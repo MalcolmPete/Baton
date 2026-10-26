@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { HiArrowRight, HiArrowDownTray, HiCog6Tooth } from 'react-icons/hi2'
 import { supabase } from '../lib/supabase'
 
@@ -41,8 +41,16 @@ const INPUT_STYLE: React.CSSProperties = {
   transition: 'border-color 0.15s',
 }
 
+// Only follow same-site paths, so ?next= can't send people to another website
+function safeNextPath(next: string | null): string | null {
+  return next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') ? next : null
+}
+
 export function Login() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  // Where to go after signing in, e.g. back to a share link
+  const next = safeNextPath(searchParams.get('next'))
   const [tab, setTab] = useState<Tab>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -65,10 +73,16 @@ export function Login() {
       if (tab === 'signin') {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
-        navigate('/')
+        navigate(next ?? '/')
       } else {
-        const { error } = await supabase.auth.signUp({ email, password })
+        const { data, error } = await supabase.auth.signUp({
+          email, password,
+          // The confirmation email links back to where they were heading
+          options: next ? { emailRedirectTo: `${window.location.origin}${next}` } : undefined,
+        })
         if (error) throw error
+        // With email confirmation off, sign-up signs them straight in
+        if (data.session) { navigate(next ?? '/'); return }
         setInfo('Check your email to confirm your account, then sign in.')
         setTab('signin')
       }
@@ -83,7 +97,7 @@ export function Login() {
     setError(null)
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/` },
+      options: { redirectTo: `${window.location.origin}${next ?? '/'}` },
     })
   }
 

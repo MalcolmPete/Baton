@@ -276,6 +276,23 @@ $$;
 
 GRANT EXECUTE ON FUNCTION claim_edit_share(TEXT) TO authenticated;
 
+-- ── Revoking an edit link removes its editors ─────────────────────────────────
+-- Regenerating a link updates its token in place, so existing editors keep
+-- access; only deleting (revoking) the edit share removes them.
+
+CREATE OR REPLACE FUNCTION remove_editors_on_share_delete()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF OLD.resource_type = 'doc' AND OLD.permission = 'edit' THEN
+    DELETE FROM doc_editors WHERE doc_id = OLD.resource_id;
+  END IF;
+  RETURN OLD;
+END;
+$$;
+
+CREATE TRIGGER shares_remove_editors AFTER DELETE ON shares
+  FOR EACH ROW EXECUTE FUNCTION remove_editors_on_share_delete();
+
 -- ── Storage bucket ────────────────────────────────────────────────────────────
 -- Create a public bucket named 'baton-images' in the Storage section, or:
 -- INSERT INTO storage.buckets (id, name, public) VALUES ('baton-images', 'baton-images', true);

@@ -316,24 +316,28 @@ export async function getShares(
 
 // Creates (or regenerates) the share link for a specific permission level.
 // Only touches the share record for that permission — the other is untouched.
+// Regenerating swaps the token in place: the old link stops working, but people who
+// already joined through an edit link keep access (deleting the share would remove them).
 export async function upsertShare(
   resourceType: 'doc' | 'folder',
   resourceId: string,
   permission: 'view' | 'edit',
 ): Promise<ShareRecord> {
   const currentUid = await uid()
-  // Remove any existing share for this resource + permission only
-  await supabase.from('shares')
-    .delete()
+  const token = generateShareToken()
+  const { data: existing } = await supabase.from('shares')
+    .select('id')
     .eq('resource_type', resourceType)
     .eq('resource_id', resourceId)
     .eq('owner_id', currentUid)
     .eq('permission', permission)
+    .maybeSingle()
 
-  const token = generateShareToken()
-  const { data, error } = await supabase.from('shares')
-    .insert({ resource_type: resourceType, resource_id: resourceId, permission, owner_id: currentUid, token })
-    .select('id, token').single()
+  const { data, error } = existing
+    ? await supabase.from('shares').update({ token }).eq('id', existing.id).select('id, token').single()
+    : await supabase.from('shares')
+        .insert({ resource_type: resourceType, resource_id: resourceId, permission, owner_id: currentUid, token })
+        .select('id, token').single()
   if (error) throw error
   return { id: data.id as string, token: data.token as string }
 }

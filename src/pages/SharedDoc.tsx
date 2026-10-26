@@ -58,6 +58,8 @@ export function SharedDoc() {
   const [notFound, setNotFound] = useState(false)
   const [claimed, setClaimed] = useState(false)
   const [annotatingImageId, setAnnotatingImageId] = useState<string | null>(null)
+  // Send people back to this link after signing in
+  const loginUrl = `/login?next=${encodeURIComponent(`/share/${token}`)}`
 
   useEffect(() => {
     if (!token) return
@@ -137,7 +139,7 @@ export function SharedDoc() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               {permission === 'edit' && !user && (
                 <button
-                  onClick={() => navigate('/login')}
+                  onClick={() => navigate(loginUrl)}
                   style={{ height: 30, padding: '0 14px', borderRadius: 8, border: '1px solid var(--border)', backgroundColor: 'var(--bg)', color: 'var(--text-1)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}
                 >
                   Sign in to edit
@@ -160,7 +162,7 @@ export function SharedDoc() {
               <span style={{ fontSize: 13, color: '#0C447C' }}>
                 You have been invited to edit this document. Sign in to make changes.
               </span>
-              <button onClick={() => navigate('/login')} style={{ fontSize: 12, color: '#0C447C', background: 'none', border: '1px solid #BDDAF5', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontWeight: 500 }}>
+              <button onClick={() => navigate(loginUrl)} style={{ fontSize: 12, color: '#0C447C', background: 'none', border: '1px solid #BDDAF5', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontWeight: 500 }}>
                 Sign in
               </button>
             </div>
